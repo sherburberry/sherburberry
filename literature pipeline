@@ -1,0 +1,74 @@
+# litpipe: config-driven literature ingestion & extraction
+
+One codebase, any topic. Search terms, databases, filters and the extraction schema all live in a YAML file.
+
+```
+fetch (OpenAlex / PubMed / arXiv / Semantic Scholar) -> dedupe (DOI, then title) -> SQLite
+  -> pdf (download OA PDFs, parse text with PyMuPDF, cache) -> extract (LLM -> JSON) -> export (CSV / MD / XLSX)
+```
+
+## 1. Install
+```bash
+python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+## 2. API keys (never put them in the YAML or in code)
+Pick one:
+
+**A. `.env` file (easiest).** `cp .env.example .env`, fill it in. `.env` is in `.gitignore`.
+
+**B. Shell environment.**
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."          # macOS / Linux (add to ~/.zshrc or ~/.bashrc to persist)
+export CONTACT_EMAIL="you@university.edu"
+```
+```powershell
+setx ANTHROPIC_API_KEY "sk-ant-..."            # Windows (open a new terminal afterwards)
+setx CONTACT_EMAIL "you@university.edu"
+```
+
+| Variable | Needed for |
+|---|---|
+| `ANTHROPIC_API_KEY` | `provider: anthropic` |
+| `OPENAI_API_KEY` | `provider: openai` (not needed for local servers via `base_url`) |
+| `CONTACT_EMAIL` | strongly recommended: OpenAlex/NCBI polite use; **required for Unpaywall PDF lookups** |
+| `NCBI_API_KEY`, `SEMANTIC_SCHOLAR_API_KEY`, `OPENALEX_API_KEY` | optional, higher rate limits |
+
+## 3. Run
+```bash
+cp config.example.yaml config_project.yaml     # edit queries + extraction fields
+python main.py --config config_project.yaml --dry-run          # check queries and see the exact LLM prompt
+python main.py --config config_project.yaml --lookback-days 3650 --limit 5   # small first test
+python main.py --config config_project.yaml                    # everything, using the config's lookback_days
+```
+Useful flags: `--stages fetch,pdf` (any subset of `fetch,pdf,extract,export`), `--force-extract`, `--retry-failed`, `--limit N`, `-v`.
+
+Outputs in `output_dir`: `papers.db` (all data), `pdfs/`, `cache/text/`, `exports/master_summary.{csv,md,xlsx}`, `exports/papers_metadata.csv`, `pipeline.log`.
+
+## 4. New topic
+Copy the config, change `project`, `search.queries` and `extraction.fields`, point `output_dir` somewhere new. Nothing else.
+
+## 5. Tuning prompts without re-downloading
+PDFs are cached by DOI/ID, parsed text by file hash. Edit `extraction.fields` / `instructions`, then
+`python main.py --config config_project.yaml --stages extract,export`. Changing fields, instructions or model creates a new
+"schema hash", so only extraction re-runs and old results are kept in the DB. Use `--limit 5` while iterating.
+
+## 6. Weekly schedule
+Set `lookback_days: 7`; duplicates from overlapping windows are merged automatically.
+```cron
+0 7 * * MON  cd /path/to/litpipe && .venv/bin/python main.py --config config_project.yaml >> cron.log 2>&1
+```
+Windows: Task Scheduler -> weekly -> program `.venv\Scripts\python.exe`, arguments `main.py --config config_project.yaml`, start in the project folder.
+
+## 7. Good to know
+* **Query syntax differs per database.** The default `query` suits OpenAlex. Add `pubmed:`, `arxiv:`, `semantic_scholar:` overrides for exact
+  semantics; otherwise a rough translation is used (and a warning is logged if the query has OR/NOT).
+* **Only open-access PDFs.** Paywalled papers end as `no_pdf`/`failed` and fall back to abstract-only extraction (`input_basis` column).
+  If you legitimately have a PDF (e.g. via your library), save it as `pdfs/<doi with / replaced by _>.pdf` and it will be picked up.
+* **Scanned PDFs** are flagged `needs_ocr` (no OCR built in). Run `ocrmypdf` on them, then `--stages pdf,extract`.
+* **Verify the output.** LLM extraction is a screening aid: spot-check sample sizes and statistics against the paper, especially for
+  papers with multiple experiments. Prompts instruct the model to return null rather than guess.
+* **Cost.** Each paper is one LLM call of up to `max_input_chars` (~15k tokens at the default). Start with `--limit`.
+* **Local LLMs:** set `provider: openai`, `base_url: http://localhost:11434/v1`, `model: <your model>` (Ollama/LM Studio). Small models are
+  less reliable at JSON and numbers.
