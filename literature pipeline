@@ -72,3 +72,10 @@ Windows: Task Scheduler -> weekly -> program `.venv\Scripts\python.exe`, argumen
 * **Cost.** Each paper is one LLM call of up to `max_input_chars` (~15k tokens at the default). Start with `--limit`.
 * **Local LLMs:** set `provider: openai`, `base_url: http://localhost:11434/v1`, `model: <your model>` (Ollama/LM Studio). Small models are
   less reliable at JSON and numbers.
+
+## 8. If you want to edit search/query terms 
+* code config_project.yaml
+* search:
+  queries:
+    - '("your new search term" OR "alternative keyword") AND ("variable of interest")'
+* python main.py --config config_project.yaml --dry-run
