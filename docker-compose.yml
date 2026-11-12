@@ -1,0 +1,13 @@
+services:
+  morning-brief:
+    build: .
+    container_name: morning-brief-bot
+    env_file: .env
+    environment:
+      - TZ=Asia/Singapore
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
